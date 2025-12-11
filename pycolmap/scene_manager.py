@@ -5,7 +5,7 @@ from io import StringIO
 from itertools import combinations
 import os
 import struct
-
+import open3d as o3d
 from .camera import Camera
 from .image import Image
 import numpy as np
@@ -17,10 +17,8 @@ from .rotation import Quaternion
 #
 #-------------------------------------------------------------------------------
 
-
-
 class SceneManager:
-  INVALID_POINT3D = np.uint64(-1)
+  INVALID_POINT3D = np.uint64(2**64 - 1)
 
   def __init__(self, colmap_results_folder, image_path=None):
     self.folder = colmap_results_folder
@@ -201,16 +199,36 @@ class SceneManager:
   #---------------------------------------------------------------------------
 
   def load_points3D(self, input_file=None):
-    if input_file is None:
-      input_file = self.folder + 'points3D.bin'
-      if os.path.exists(input_file):
-        self._load_points3D_bin(input_file)
-      else:
-        input_file = self.folder + 'points3D.txt'
-        if os.path.exists(input_file):
-          self._load_points3D_txt(input_file)
-        else:
-          raise IOError('no points3D file found')
+      if input_file is None:
+        input_file_bin = self.folder + 'points3D.bin'
+        if os.path.exists(input_file_bin):
+          self._load_points3D_bin(input_file_bin)
+          return
+        input_file_txt = self.folder + 'points3D.txt'
+        if os.path.exists(input_file_txt):
+          self._load_points3D_txt(input_file_txt)
+          return
+        input_file_ply = self.folder + 'points3D.ply'
+        if os.path.exists(input_file_ply):
+          self._load_points3D_ply(input_file_ply) 
+          return
+        raise IOError('no points3D file found (tried .bin, .txt, and .ply)')
+
+  def _load_points3D_ply(self, input_file):
+    pcd = o3d.io.read_point_cloud(input_file)
+    points = np.asarray(pcd.points)
+    colors = np.asarray(pcd.colors) * 255.0
+    num_points3D = points.shape[0]
+
+    self.points3D = points
+    self.point3D_ids = np.arange(num_points3D, dtype=np.uint64)
+    self.point3D_colors = colors.astype(np.uint8)
+    self.point3D_id_to_point3D_idx = {
+        point3D_id: idx for idx, point3D_id in enumerate(self.point3D_ids)}
+    self.point3D_id_to_images = {
+        point3D_id: np.empty((0, 2), dtype=np.uint32)
+        for point3D_id in self.point3D_ids}
+    self.point3D_errors = np.zeros(num_points3D)
 
   def _load_points3D_bin(self, input_file):
     with open(input_file, 'rb') as f:
